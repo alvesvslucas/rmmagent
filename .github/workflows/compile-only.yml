@@ -1,0 +1,64 @@
+name: Compilar agente sem execução
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - '**/*.go'
+      - go.mod
+      - go.sum
+      - agent/scripts/**
+      - .github/workflows/compile-only.yml
+  pull_request:
+    paths:
+      - '**/*.go'
+      - go.mod
+      - go.sum
+      - agent/scripts/**
+      - .github/workflows/compile-only.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compile-only-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    name: Compilar os alvos declarados no CI upstream
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CGO_ENABLED: '0'
+      GOFLAGS: -mod=readonly
+    steps:
+      - name: Obter código sem persistir credenciais
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Preparar o Go declarado no workflow existente
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.20.13'
+          cache: false
+      - name: Compilar sem executar agente, testes ou instaladores
+        shell: bash
+        run: |
+          set -euo pipefail
+          targets=(
+            linux/amd64 linux/386 linux/arm64 linux/arm
+            windows/amd64 windows/386
+            darwin/amd64 darwin/arm64
+          )
+          for target in "${targets[@]}"; do
+            goos="${target%/*}"
+            goarch="${target#*/}"
+            output="$RUNNER_TEMP/rmmagent-${goos}-${goarch}"
+            if [ "$goos" = windows ]; then output="${output}.exe"; fi
+            echo "Compilando ${target} sem execução."
+            env GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags "-s -w" -o "$output" .
+            test -s "$output"
+          done
+
